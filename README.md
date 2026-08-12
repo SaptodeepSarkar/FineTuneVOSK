@@ -94,16 +94,19 @@ python run.py package                                                # package t
 
 ## Record & transcribe live (microphone)
 
-Talk into your mic and get a real-time transcript, with every run saved as a
-fresh audio + transcript pair in `recordings/`. Transcription is done by
-**Whisper** — the same engine the fine-tune pipeline uses to create labels
-(VOSK is what gets *fine-tuned*, it is not used to transcribe):
+Talk into your mic and get a real-time transcript in a live **TUI** that shows
+the recording-seconds counter, where the clip will be saved, an **ASCII-art
+audio visualizer**, a **Silero-VAD** speech/silence indicator, and the growing
+live transcript. Every run saves a fresh audio + transcript pair to
+`recordings/`. Transcription is done by **Whisper** — the same engine the
+fine-tune pipeline uses for labels (VOSK is what gets *fine-tuned*, it is not
+used to transcribe):
 
 ```bash
-# Install the mic deps (Whisper + sounddevice)
+# Install the mic deps (Whisper + sounddevice + VAD)
 pip install -r requirements.txt
 
-# Record until you press Enter — live partial text prints as you speak
+# Record until you press Enter (first run downloads Whisper large-v3, ~3 GB)
 python scripts/live_transcribe.py
 
 # Auto-stop after 15 seconds
@@ -111,6 +114,10 @@ python scripts/live_transcribe.py --duration 15
 
 # Use a smaller/faster Whisper model for snappier live updates
 python scripts/live_transcribe.py --whisper-model small
+
+# Force / select the compute backend (auto avoids a hanging GPU probe)
+python scripts/live_transcribe.py --whisper-device cpu      # CPU (int8)
+python scripts/live_transcribe.py --whisper-device cuda     # force GPU (float16)
 
 # See / pick a microphone
 python scripts/live_transcribe.py --list-devices
@@ -125,10 +132,15 @@ recordings/rec_20260812_193000.txt      # Audio: <file>  /  Transcript: <text>
 recordings/transcripts.tsv              # master log:  audio<TAB>transcript
 ```
 
-> Whisper `large-v3` is the default (best accent coverage — Indian, German
-> English, etc.). Use `--whisper-model small`/`medium`/`base`/`tiny` for faster
-> live updates. These recordings + transcripts are a great source for the
-> fine-tune pipeline (drop the folder into `data/raw/`).
+> **Why `--whisper-device`?** On machines where the NVIDIA *driver* is present
+> but the CUDA *runtime libraries* (`libcublas`) are missing — or are only
+> bundled inside other apps like ollama/DaVinci Resolve — loading Whisper on
+> GPU would hang instead of erroring. The tool detects a *usable* cuBLAS up
+> front and falls back to CPU automatically, so `auto` never hangs. Use `cuda`
+> explicitly on a properly set-up GPU box.
+>
+> These recordings + transcripts are a great source for the fine-tune pipeline
+> (drop the folder into `data/raw/`).
 
 ---
 
