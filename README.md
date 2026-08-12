@@ -95,10 +95,12 @@ python run.py package                                                # package t
 ## Record & transcribe live (microphone)
 
 Talk into your mic and get a real-time transcript, with every run saved as a
-fresh audio + transcript pair in `recordings/`:
+fresh audio + transcript pair in `recordings/`. Transcription is done by
+**Whisper** — the same engine the fine-tune pipeline uses to create labels
+(VOSK is what gets *fine-tuned*, it is not used to transcribe):
 
 ```bash
-# Install the mic deps (vosk + sounddevice)
+# Install the mic deps (Whisper + sounddevice)
 pip install -r requirements.txt
 
 # Record until you press Enter — live partial text prints as you speak
@@ -106,6 +108,9 @@ python scripts/live_transcribe.py
 
 # Auto-stop after 15 seconds
 python scripts/live_transcribe.py --duration 15
+
+# Use a smaller/faster Whisper model for snappier live updates
+python scripts/live_transcribe.py --whisper-model small
 
 # See / pick a microphone
 python scripts/live_transcribe.py --list-devices
@@ -120,10 +125,10 @@ recordings/rec_20260812_193000.txt      # Audio: <file>  /  Transcript: <text>
 recordings/transcripts.tsv              # master log:  audio<TAB>transcript
 ```
 
-> The default model is the Indian-English `vosk-model-small-en-in-0.4` already
-> bundled in `models/`. Point `--model` at any other VOSK model to use it
-> instead. These recordings + transcripts are a great source for the Whisper
-> fine-tune pipeline above (drop the folder into `data/raw/`).
+> Whisper `large-v3` is the default (best accent coverage — Indian, German
+> English, etc.). Use `--whisper-model small`/`medium`/`base`/`tiny` for faster
+> live updates. These recordings + transcripts are a great source for the
+> fine-tune pipeline (drop the folder into `data/raw/`).
 
 ---
 

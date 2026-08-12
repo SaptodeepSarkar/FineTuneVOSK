@@ -1,30 +1,31 @@
 #!/usr/bin/env python3
-"""Live microphone transcription with a VOSK model.
+"""Live microphone transcription with WHISPER.
 
-Records your microphone, transcribes in real time, and saves — on every run —
-a brand-new pair of files side by side in a `recordings/` folder:
+VOSK is the model being *fine-tuned* — it is NOT used here. Transcription is
+done by Whisper (faster-whisper), the same engine the fine-tune pipeline uses
+to generate training labels, so your live clips and transcripts feed directly
+into training.
+
+Records your microphone, transcribes incrementally as you speak, and on every
+run saves a brand-new pair of files side by side in a `recordings/` folder:
 
     recordings/rec_20260812_193000.wav      # the audio you spoke
     recordings/rec_20260812_193000.txt      # the transcript (side by side)
-
-It also appends every clip to a master side-by-side log:
-    recordings/transcripts.tsv              # audio_path <TAB> transcript
-
-Live partial results print to the console as you speak.
+    recordings/transcripts.tsv              # master log:  audio<TAB>transcript
 
 Usage:
     python scripts/live_transcribe.py                    # record until you press Enter
     python scripts/live_transcribe.py --duration 15      # auto-stop after 15 s
+    python scripts/live_transcribe.py --whisper-model small   # faster live updates
     python scripts/live_transcribe.py --list-devices     # show microphones
     python scripts/live_transcribe.py --device 0         # pick a specific mic
-    python scripts/live_transcribe.py --model models/vosk-model-small-en-in-0.4
 """
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
+import time
 import wave
 from datetime import datetime
 from pathlib import Path
@@ -32,40 +33,37 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
-MODELS_DIR = ROOT / "models"
 REC_DIR = ROOT / "recordings"
-SAMPLE_RATE = 16000          # VOSK requirement
-CHUNK_SECONDS = 0.1          # 100 ms frames for snappy live updates
+SAMPLE_RATE = 16000
+CHUNK_SECONDS = 0.2        # recording granularity
+UPDATE_SECONDS = 2.0       # how often to refresh the live transcript
+WHISPER_MODEL = "large-v3"  # best accent coverage; use small/medium for speed
+WHISPER_DEVICE = "auto"
+WHISPER_COMPUTE = "auto"
+WHISPER_LANGUAGE = None
 
 
-def _find_model(override: str | None) -> Path:
-    """Locate a VOSK model: explicit path, the Indian-English model, or any model."""
-    if override:
-        p = Path(override)
-        if not p.is_dir():
-            sys.exit(f"[error] model folder not found: {p}")
-        return p
-    candidates = [
-        MODELS_DIR / "vosk-model-small-en-in-0.4",
-        MODELS_DIR / "vosk-model-en-in-0.5",
-    ]
-    for cand in candidates:
-        if cand.is_dir():
-            return cand
-    # Fall back to any directory containing a VOSK model signature.
-    for cand in sorted(MODELS_DIR.iterdir()):
-        if cand.is_dir() and ((cand / "conf" / "model.conf").is_file()
-                              or (cand / "am" / "final.mdl").is_file()):
-            return cand
-    sys.exit(
-        "[error] no VOSK model found in models/. Put one there, e.g. "
-        "vosk-model-small-en-in-0.4, or pass --model PATH"
+def _samples_to_float(pcm: np.ndarray) -> np.ndarray:
+    """int16 PCM -> float32 in [-1, 1] (what Whisper expects)."""
+    pcm = np.asarray(pcm, dtype=np.int16).reshape(-1)  # ensure 1D for VAD
+    return (pcm.astype(np.float32) / 32768.0)
+
+
+def _clean(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _transcribe(model, pcm: np.ndarray, language: str | None) -> list[str]:
+    """Run Whisper on a float32 buffer; return segment texts."""
+    if pcm.size == 0:
+        return []
+    segments, _ = model.transcribe(
+        _samples_to_float(pcm),
+        language=language,
+        vad_filter=True,
+        beam_size=5,
     )
-
-
-def _clean_partial(text: str) -> str:
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
+    return [_clean(s.text) for s in segments if _clean(s.text)]
 
 
 def _unique_stamp() -> str:
@@ -87,20 +85,16 @@ def _save_clip(audio: np.ndarray, transcript: str) -> tuple[Path, Path]:
     wav_path = REC_DIR / f"rec_{stamp}.wav"
     txt_path = REC_DIR / f"rec_{stamp}.txt"
 
-    # Write 16-bit PCM mono WAV.
     with wave.open(str(wav_path), "wb") as wf:
         wf.setnchannels(1)
         wf.setsampwidth(2)
         wf.setframerate(SAMPLE_RATE)
         wf.writeframes(audio.tobytes())
 
-    # Side-by-side transcript file.
     txt_path.write_text(
         f"Audio: {wav_path.name}\nTranscript: {transcript.strip()}\n",
         encoding="utf-8",
     )
-
-    # Append to the master side-by-side log (audio<TAB>text).
     with open(REC_DIR / "transcripts.tsv", "a", encoding="utf-8") as log:
         log.write(f"{wav_path.name}\t{transcript.strip()}\n")
 
@@ -108,14 +102,17 @@ def _save_clip(audio: np.ndarray, transcript: str) -> tuple[Path, Path]:
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="Live VOSK microphone transcription")
-    p.add_argument("--model", default=None, help="path to a VOSK model folder")
+    p = argparse.ArgumentParser(description="Live Whisper microphone transcription")
+    p.add_argument("--whisper-model", default=WHISPER_MODEL,
+                   help=f"Whisper model for transcription. default: {WHISPER_MODEL}")
     p.add_argument("--device", type=int, default=None,
                    help="input device index (see --list-devices)")
     p.add_argument("--list-devices", action="store_true",
                    help="list microphone devices and exit")
     p.add_argument("--duration", type=float, default=None,
                    help="auto-stop after N seconds; default: wait for Enter")
+    p.add_argument("--language", default=WHISPER_LANGUAGE,
+                   help="force transcript language (e.g. en, hi); auto-detect if unset")
     args = p.parse_args()
 
     import sounddevice as sd
@@ -124,17 +121,8 @@ def main() -> int:
         print(sd.query_devices())
         return 0
 
-    model_dir = _find_model(args.model)
-    print(f"[model] {model_dir}")
+    from faster_whisper import WhisperModel
 
-    from vosk import KaldiRecognizer, Model, SetLogLevel
-    SetLogLevel(-1)
-    recognizer = KaldiRecognizer(Model(str(model_dir)), SAMPLE_RATE)
-    recognizer.SetWords(False)
-
-    # Some raw ALSA/Native hw devices reject the 16 kHz stream PortAudio asks
-    # for. Probe the requested device briefly and fall back to the system
-    # default (pipewire/pulse resamples) if it cannot open at 16 kHz.
     device = args.device
     try:
         sd.rec(SAMPLE_RATE // 10, samplerate=SAMPLE_RATE, channels=1,
@@ -142,62 +130,88 @@ def main() -> int:
         sd.wait()
     except Exception as e:
         if device is not None:
-            print(f"[warn] device {device} can't open at {SAMPLE_RATE} Hz "
+            print(f"[warn] mic {device} can't open at {SAMPLE_RATE} Hz "
                   f"({type(e).__name__}); falling back to the default microphone")
             device = None
 
-    chunk_frames = int(SAMPLE_RATE * CHUNK_SECONDS)
-    collected: list[np.ndarray] = []
-    last_partial = ""
+    compute = WHISPER_COMPUTE
+    dev = WHISPER_DEVICE
+    if dev == "auto" or compute == "auto":
+        import ctranslate2
+        has_cuda = ctranslate2.get_cuda_device_count() > 0
+        if dev == "auto":
+            dev = "cuda" if has_cuda else "cpu"
+        if compute == "auto":
+            compute = "float16" if has_cuda else "int8"
 
-    def show_partial(text: str):
-        nonlocal last_partial
-        pad = " " * max(0, len(last_partial) - len(text))
-        sys.stdout.write(f"\r[partial] {text}{pad}")
+    print(f"[model] loading Whisper '{args.whisper_model}' on {dev} ({compute}) ...")
+    t0 = time.time()
+    if dev == "cuda":
+        # The driver can report CUDA while the runtime libs (libcublas) are
+        # missing, which only fails at load/encode time. Probe and fall back to
+        # CPU so the tool never hard-crashes on a half-configured GPU box.
+        try:
+            model = WhisperModel(args.whisper_model, device="cuda", compute_type="float16")
+            list(model.transcribe(np.zeros(SAMPLE_RATE // 2, np.float32), beam_size=1))
+        except Exception as e:
+            print(f"[warn] CUDA unavailable ({type(e).__name__}); falling back to CPU")
+            model = WhisperModel(args.whisper_model, device="cpu", compute_type="int8")
+            dev, compute = "cpu", "int8"
+    else:
+        model = WhisperModel(args.whisper_model, device=dev, compute_type=compute)
+    print(f"[model] ready in {time.time() - t0:.1f}s")
+
+    chunk_frames = int(SAMPLE_RATE * CHUNK_SECONDS)
+    chunks: list[np.ndarray] = []
+    cursor_frames = 0
+    live_text = ""
+    last_shown = ""
+
+    def refresh_live():
+        nonlocal cursor_frames, live_text, last_shown
+        new_pcm = np.concatenate(chunks)[cursor_frames:] if chunks else np.zeros(0, dtype=np.int16)
+        if new_pcm.size:
+            new_texts = _transcribe(model, new_pcm, args.language)
+            if new_texts:
+                live_text = _clean(live_text + " " + " ".join(new_texts))
+            cursor_frames = sum(c.size for c in chunks)
+        line = f"[live] {live_text}" if live_text else "[live] (speaking...)"
+        pad = " " * max(0, len(last_shown) - len(line))
+        sys.stdout.write(f"\r{line}{pad}")
         sys.stdout.flush()
-        last_partial = text
+        last_shown = line
 
     print("[start] Speak now. Press Enter to stop"
           + (f"  (auto-stop in {args.duration:.0f}s)" if args.duration else "") + "\n")
     finished = False
+    last_update = time.time()
     try:
         while not finished:
             audio = sd.rec(chunk_frames, samplerate=SAMPLE_RATE,
                            channels=1, dtype="int16", device=device)
             sd.wait()
-            collected.append(audio.copy())
+            chunks.append(audio.copy())
 
-            if recognizer.AcceptWaveform(audio.tobytes()):
-                res = json.loads(recognizer.Result())
-                txt = _clean_partial(res.get("text", ""))
-                if txt:
-                    print("\r[final]   " + txt + "   ")
-                    last_partial = ""
-            else:
-                partial = _clean_partial(
-                    json.loads(recognizer.PartialResult()).get("partial", ""))
-                if partial:
-                    show_partial(partial)
+            if time.time() - last_update >= UPDATE_SECONDS:
+                refresh_live()
+                last_update = time.time()
 
-            # Stop conditions.
-            if args.duration is not None:
-                seconds = len(collected) * CHUNK_SECONDS
-                if seconds >= args.duration:
-                    finished = True
+            if args.duration is not None and len(chunks) * CHUNK_SECONDS >= args.duration:
+                finished = True
     except KeyboardInterrupt:
         finished = True
     finally:
-        print("")  # newline after the partial line
+        print("")
 
-    final = json.loads(recognizer.FinalResult()).get("text", "")
-    transcript = _clean_partial(final)
-    if last_partial and not transcript:
-        transcript = last_partial
+    # Final accurate transcription of the whole clip.
+    full_pcm = np.concatenate(chunks) if chunks else np.zeros(0, dtype=np.int16)
+    transcript = _clean(" ".join(_transcribe(model, full_pcm, args.language)))
+    if not transcript:
+        transcript = live_text
 
-    full_audio = np.concatenate(collected) if collected else np.zeros(0, dtype=np.int16)
-    wav_path, txt_path = _save_clip(full_audio, transcript)
+    wav_path, txt_path = _save_clip(full_pcm, transcript)
 
-    print("\n===== final transcript =====")
+    print("\n===== final transcript (Whisper) =====")
     print(transcript if transcript else "(no speech detected)")
     print(f"\nSaved:  {wav_path}")
     print(f"        {txt_path}")

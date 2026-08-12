@@ -41,13 +41,26 @@ def _load_model(model_name: str, device: str, compute_type: str):
         ) from e
     if device == "auto":
         try:
-            import torch  # noqa: F401
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-        except ImportError:
+            import ctranslate2
+            device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
+        except Exception:
             device = "cpu"
     if compute_type == "auto":
         compute_type = "float16" if device == "cuda" else "int8"
-    return WhisperModel(model_name, device=device, compute_type=compute_type)
+    try:
+        model = WhisperModel(model_name, device=device, compute_type=compute_type)
+        # The driver can report CUDA while the runtime libs (libcublas) are
+        # missing, which only fails at encode time. Probe once and fall back.
+        if device == "cuda":
+            import numpy as np
+            list(model.transcribe(np.zeros(16000, np.float32), beam_size=1))
+        return model
+    except Exception:
+        if device != "cpu" or compute_type != "int8":
+            print("[transcribe] WARNING: requested backend unavailable; "
+                  "falling back to CPU/int8")
+            return WhisperModel(model_name, device="cpu", compute_type="int8")
+        raise
 
 
 def transcribe_file(model, wav_path: Path, language=None, beam_size=5) -> str:
