@@ -12,6 +12,7 @@ models/**
 !models/.gitkeep
 work/
 output/
+recordings/
 *.wav
 *.mp3
 *.m4a

@@ -2,8 +2,13 @@
 # Install with:  pip install -r requirements.txt
 #
 # NOTE: the actual VOSK (Kaldi) training runs inside Docker or a host Kaldi
-# build — see scripts/setup_kaldi.sh. This file only covers the Python
-# automation (audio normalization + Whisper transcription + data prep).
+# build — see scripts/setup_kaldi.sh. This file covers the Python automation
+# (audio normalization + Whisper transcription + live recording).
 
 # Whisper transcription (CTranslate2 backend — fast, low-RAM, GPU/CPU).
 faster-whisper>=1.0.0
+
+# Live microphone recording + transcription (scripts/live_transcribe.py).
+vosk>=0.3.45
+sounddevice>=0.4.6
+numpy>=1.24

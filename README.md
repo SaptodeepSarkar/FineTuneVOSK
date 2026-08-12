@@ -92,6 +92,41 @@ python run.py package                                                # package t
 
 ---
 
+## Record & transcribe live (microphone)
+
+Talk into your mic and get a real-time transcript, with every run saved as a
+fresh audio + transcript pair in `recordings/`:
+
+```bash
+# Install the mic deps (vosk + sounddevice)
+pip install -r requirements.txt
+
+# Record until you press Enter — live partial text prints as you speak
+python scripts/live_transcribe.py
+
+# Auto-stop after 15 seconds
+python scripts/live_transcribe.py --duration 15
+
+# See / pick a microphone
+python scripts/live_transcribe.py --list-devices
+python scripts/live_transcribe.py --device 0
+```
+
+Each run writes side by side:
+
+```
+recordings/rec_20260812_193000.wav      # the audio you spoke
+recordings/rec_20260812_193000.txt      # Audio: <file>  /  Transcript: <text>
+recordings/transcripts.tsv              # master log:  audio<TAB>transcript
+```
+
+> The default model is the Indian-English `vosk-model-small-en-in-0.4` already
+> bundled in `models/`. Point `--model` at any other VOSK model to use it
+> instead. These recordings + transcripts are a great source for the Whisper
+> fine-tune pipeline above (drop the folder into `data/raw/`).
+
+---
+
 ## "Any audio, in any format" — what that really means
 
 * **Formats**: `wav`, `mp3`, `m4a`, `aac`, `ogg`, `opus`, `flac`, `wma`, `aiff`, `amr`, `webm`, `mp4`, `mkv`, `mov`, `3gp` … anything `ffmpeg` can read. If `ffmpeg` can play it, the pipeline can train on it.
