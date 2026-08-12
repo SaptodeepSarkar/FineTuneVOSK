@@ -68,10 +68,22 @@ def _clean_partial(text: str) -> str:
     return text
 
 
+def _unique_stamp() -> str:
+    """Timestamp with a collision guard so every run gets a fresh file name."""
+    i = 0
+    while True:
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        if i:
+            stamp += f"_{i}"
+        if not (REC_DIR / f"rec_{stamp}.wav").exists():
+            return stamp
+        i += 1
+
+
 def _save_clip(audio: np.ndarray, transcript: str) -> tuple[Path, Path]:
     """Write the audio wav + side-by-side transcript, return both paths."""
     REC_DIR.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    stamp = _unique_stamp()
     wav_path = REC_DIR / f"rec_{stamp}.wav"
     txt_path = REC_DIR / f"rec_{stamp}.txt"
 
