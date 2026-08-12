@@ -1,0 +1,31 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# --- Data / models / work dirs (never commit user audio or trained models) ---
+data/raw/**
+!data/raw/.gitkeep
+models/**
+!models/.gitkeep
+work/
+output/
+*.wav
+*.mp3
+*.m4a
+*.flac
+*.ogg
+
+# --- Kaldi (built locally, never committed) ---
+kaldi/
+
+# --- Whisper / torch caches ---
+.cache/
+.huggingface/
+
+# --- OS / IDE ---
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,9 @@
+# FineTuneVOSK runtime dependencies (Python side).
+# Install with:  pip install -r requirements.txt
+#
+# NOTE: the actual VOSK (Kaldi) training runs inside Docker or a host Kaldi
+# build — see scripts/setup_kaldi.sh. This file only covers the Python
+# automation (audio normalization + Whisper transcription + data prep).
+
+# Whisper transcription (CTranslate2 backend — fast, low-RAM, GPU/CPU).
+faster-whisper>=1.0.0
