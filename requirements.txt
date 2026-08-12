@@ -5,10 +5,15 @@
 # build — see scripts/setup_kaldi.sh. This file covers the Python automation
 # (audio normalization + Whisper transcription + live recording).
 
-# Whisper transcription (CTranslate2 backend — fast, low-RAM, GPU/CPU).
+# ---- Transcription engine (Whisper) --------------------------------------
+# Used for BOTH offline label generation (fine-tune pipeline) and live
+# microphone transcription. CTranslate2 backend — fast, low-RAM, GPU/CPU.
+# VOSK is the model being FINE-TUNED; it is NOT used for transcription.
 faster-whisper>=1.0.0
 
-# Live microphone recording + transcription (scripts/live_transcribe.py).
-vosk>=0.3.45
+# ---- Live microphone recording (scripts/live_transcribe.py) --------------
 sounddevice>=0.4.6
 numpy>=1.24
+
+# ---- Testing the fine-tuned model (scripts/test_model.py) ----------------
+vosk>=0.3.45
